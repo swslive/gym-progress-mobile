@@ -372,6 +372,7 @@ function MainApp({
   const [progress, setProgress] = useState<ProgressSummary[]>([]);
   const [editingWorkoutId, setEditingWorkoutId] = useState<number | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
+  const [sessionReturnScreen, setSessionReturnScreen] = useState<Screen>('home');
 
   const refreshData = useCallback(async () => {
     setLoading(true);
@@ -405,8 +406,9 @@ function MainApp({
     setScreen('workout-form');
   }
 
-  function openSession(sessionId: number) {
+  function openSession(sessionId: number, returnScreen: Screen = 'home') {
     setActiveSessionId(sessionId);
+    setSessionReturnScreen(returnScreen);
     setScreen('session');
   }
 
@@ -445,7 +447,7 @@ function MainApp({
             onRefresh={refreshData}
             onCreateWorkout={() => openWorkoutForm(null)}
             onStarted={(session) => {
-              openSession(session.id);
+              openSession(session.id, 'home');
               refreshData();
             }}
             onError={setError}
@@ -485,10 +487,10 @@ function MainApp({
             token={token}
             sessionId={activeSessionId}
             weightUnit={user.weight_unit}
-            onFinished={async () => {
+            onDone={async () => {
               await refreshData();
-              onMessage('Workout completed.');
-              setScreen('home');
+              onMessage('Progress saved.');
+              setScreen(sessionReturnScreen);
             }}
             onError={setError}
           />
@@ -507,7 +509,7 @@ function MainApp({
           />
         ) : null}
 
-        {screen === 'history' ? <HistoryScreen sessions={sessions} progress={progress} onRefresh={refreshData} /> : null}
+        {screen === 'history' ? <HistoryScreen sessions={sessions} progress={progress} onRefresh={refreshData} onOpenSession={(sessionId) => openSession(sessionId, 'history')} /> : null}
       </ScrollView>
 
       <BottomNav screen={screen} onChange={setScreen} />
@@ -534,7 +536,7 @@ function HomeScreen({
   onSettings: () => void;
   onHistory: () => void;
 }) {
-  const completed = sessions.filter((session) => session.completed_at).length;
+  const sessionCount = sessions.length;
   const totalSets = progress.reduce((sum, item) => sum + item.total_sets, 0);
 
   return (
@@ -555,7 +557,7 @@ function HomeScreen({
 
       <View style={styles.metricsGrid}>
         <Metric icon={Dumbbell} label="Workouts" value={String(workouts.length)} />
-        <Metric icon={Clock} label="Completed" value={String(completed)} />
+        <Metric icon={Clock} label="Sessions" value={String(sessionCount)} />
         <Metric icon={Activity} label="Logged sets" value={String(totalSets)} />
       </View>
 
@@ -960,18 +962,17 @@ function WorkoutSessionScreen({
   token,
   sessionId,
   weightUnit,
-  onFinished,
+  onDone,
   onError,
 }: {
   token: string;
   sessionId: number;
   weightUnit: WeightUnit;
-  onFinished: () => Promise<void>;
+  onDone: () => Promise<void>;
   onError: (message: string) => void;
 }) {
   const [session, setSession] = useState<WorkoutSession | null>(null);
   const [loading, setLoading] = useState(true);
-  const [finishing, setFinishing] = useState(false);
 
   const loadSession = useCallback(async () => {
     setLoading(true);
@@ -989,23 +990,6 @@ function WorkoutSessionScreen({
   useEffect(() => {
     loadSession();
   }, [loadSession]);
-
-  async function finishWorkout() {
-    const runFinish = async () => {
-      setFinishing(true);
-
-      try {
-        await sessionsApi.completeWorkoutSession(token, sessionId, 'Completed successfully.');
-        await onFinished();
-      } catch (finishError) {
-        onError(compactError(finishError));
-      } finally {
-        setFinishing(false);
-      }
-    };
-
-    confirmAction('Finish this workout?', runFinish);
-  }
 
   if (loading || !session) {
     return <CenterPanel text="Loading workout session" compact />;
@@ -1030,7 +1014,7 @@ function WorkoutSessionScreen({
           onError={onError}
         />
       ))}
-      <PrimaryButton icon={Check} label="Finish Workout" loading={finishing} onPress={finishWorkout} />
+      <PrimaryButton icon={Check} label="Done" onPress={onDone} />
     </View>
   );
 }
@@ -1214,7 +1198,17 @@ function SettingsScreen({
   );
 }
 
-function HistoryScreen({ sessions, progress, onRefresh }: { sessions: WorkoutSession[]; progress: ProgressSummary[]; onRefresh: () => Promise<void> }) {
+function HistoryScreen({
+  sessions,
+  progress,
+  onRefresh,
+  onOpenSession,
+}: {
+  sessions: WorkoutSession[];
+  progress: ProgressSummary[];
+  onRefresh: () => Promise<void>;
+  onOpenSession: (sessionId: number) => void;
+}) {
   return (
     <View style={styles.stack}>
       <SectionTitle icon={History} title="History & Progress" />
@@ -1226,11 +1220,15 @@ function HistoryScreen({ sessions, progress, onRefresh }: { sessions: WorkoutSes
           <Text style={styles.cardText}>Max {item.display_max_weight ?? 0} {item.display_weight_unit ?? 'kg'}</Text>
         </View>
       ))}
-      {sessions.filter((session) => session.completed_at).map((session) => (
+      {sessions.map((session) => (
         <View key={session.id} style={styles.listCard}>
-          <Text style={styles.cardTitle}>{session.workout?.name ?? `Workout #${session.workout_id}`}</Text>
+          <View style={styles.cardTopLine}>
+            <Text style={styles.cardTitle}>{session.workout?.name ?? `Workout #${session.workout_id}`}</Text>
+            <Text style={styles.pill}>{session.total_sets ?? session.workout_sets?.length ?? 0} sets</Text>
+          </View>
           <Text style={styles.cardText}>Started {new Date(session.started_at).toLocaleString()}</Text>
-          <Text style={styles.cardText}>Completed {session.completed_at ? new Date(session.completed_at).toLocaleString() : 'Not completed'}</Text>
+          {session.completed_at ? <Text style={styles.cardText}>Completed {new Date(session.completed_at).toLocaleString()}</Text> : null}
+          <SecondaryButton icon={Pencil} label="Edit Session" onPress={() => onOpenSession(session.id)} />
         </View>
       ))}
     </View>

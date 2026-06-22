@@ -97,6 +97,8 @@ export type WorkoutSession = {
   started_at: string;
   completed_at?: string | null;
   notes?: string | null;
+  total_sets?: number;
+  is_editable?: boolean;
   workout?: Workout | null;
   exercises?: SessionExercise[];
   workout_sets?: WorkoutSet[];
