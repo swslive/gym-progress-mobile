@@ -1671,7 +1671,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 13,
     backgroundColor: colors.white,
     color: colors.ink,
-    fontSize: 15,
+    fontSize: 16,
   },
   shortInput: {
     flex: 1,

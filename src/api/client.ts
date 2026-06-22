@@ -1,4 +1,10 @@
-export const API_BASE_URL = 'https://apigymapp.local/api';
+declare const process: {
+  env: Record<string, string | undefined>;
+};
+
+const fallbackApiBaseUrl = 'https://apigymapp.local/api';
+
+export const API_BASE_URL = (process.env.EXPO_PUBLIC_API_BASE_URL || fallbackApiBaseUrl).replace(/\/$/, '');
 export const API_ORIGIN = API_BASE_URL.replace(/\/api$/, '');
 
 export type ApiEnvelope<T> = {
