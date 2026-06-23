@@ -1,8 +1,20 @@
 import { apiRequest } from './client';
 import type { WorkoutSession, WorkoutSet, WeightUnit } from './types';
 
-export function listWorkoutSessions(token: string) {
-  return apiRequest<{ workout_sessions: WorkoutSession[] }>('/workout-sessions', {}, token);
+export function listWorkoutSessions(token: string, filters?: { date_from?: string; date_to?: string }) {
+  const params = new URLSearchParams();
+
+  if (filters?.date_from) {
+    params.set('date_from', filters.date_from);
+  }
+
+  if (filters?.date_to) {
+    params.set('date_to', filters.date_to);
+  }
+
+  const query = params.toString();
+
+  return apiRequest<{ workout_sessions: WorkoutSession[] }>(`/workout-sessions${query ? `?${query}` : ''}`, {}, token);
 }
 
 export function startWorkoutSession(token: string, workoutId: number, notes?: string) {
@@ -14,6 +26,10 @@ export function startWorkoutSession(token: string, workoutId: number, notes?: st
 
 export function showWorkoutSession(token: string, sessionId: number) {
   return apiRequest<{ workout_session: WorkoutSession }>(`/workout-sessions/${sessionId}`, {}, token);
+}
+
+export function deleteWorkoutSession(token: string, sessionId: number) {
+  return apiRequest(`/workout-sessions/${sessionId}`, { method: 'DELETE' }, token);
 }
 
 export function completeWorkoutSession(token: string, sessionId: number, notes?: string) {

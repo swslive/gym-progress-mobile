@@ -115,6 +115,16 @@ export default function App() {
     boot();
   }, [saveToken]);
 
+  useEffect(() => {
+    if (!message) {
+      return undefined;
+    }
+
+    const timeout = setTimeout(() => setMessage(''), 3200);
+
+    return () => clearTimeout(timeout);
+  }, [message]);
+
   const handleLogout = useCallback(async () => {
     try {
       if (token) {
@@ -412,6 +422,22 @@ function MainApp({
     setScreen('session');
   }
 
+  function deleteSession(session: WorkoutSession) {
+    const workoutName = session.workout?.name ?? `Workout #${session.workout_id}`;
+
+    confirmAction(`Delete ${workoutName} session?`, async () => {
+      setError('');
+
+      try {
+        await sessionsApi.deleteWorkoutSession(token, session.id);
+        await refreshData();
+        onMessage('Workout session deleted.');
+      } catch (deleteError) {
+        setError(compactError(deleteError));
+      }
+    });
+  }
+
   return (
     <Shell>
       <View style={styles.header}>
@@ -423,7 +449,6 @@ function MainApp({
       </View>
 
       <ScrollView contentContainerStyle={styles.body}>
-        {message ? <InlineNotice type="success" text={message} /> : null}
         {error ? <InlineNotice type="error" text={error} /> : null}
         {loading ? <CenterPanel text="Syncing data" compact /> : null}
 
@@ -509,9 +534,17 @@ function MainApp({
           />
         ) : null}
 
-        {screen === 'history' ? <HistoryScreen sessions={sessions} progress={progress} onRefresh={refreshData} onOpenSession={(sessionId) => openSession(sessionId, 'history')} /> : null}
+        {screen === 'history' ? (
+          <HistoryScreen
+            sessions={sessions}
+            onRefresh={refreshData}
+            onOpenSession={(sessionId) => openSession(sessionId, 'history')}
+            onDeleteSession={deleteSession}
+          />
+        ) : null}
       </ScrollView>
 
+      {message ? <ToastNotice text={message} /> : null}
       <BottomNav screen={screen} onChange={setScreen} />
     </Shell>
   );
@@ -1200,27 +1233,39 @@ function SettingsScreen({
 
 function HistoryScreen({
   sessions,
-  progress,
   onRefresh,
   onOpenSession,
+  onDeleteSession,
 }: {
   sessions: WorkoutSession[];
-  progress: ProgressSummary[];
   onRefresh: () => Promise<void>;
   onOpenSession: (sessionId: number) => void;
+  onDeleteSession: (session: WorkoutSession) => void;
 }) {
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const filteredSessions = sessions.filter((session) => isDateInRange(session.started_at, fromDate, toDate));
+
   return (
     <View style={styles.stack}>
-      <SectionTitle icon={History} title="History & Progress" />
+      <SectionTitle icon={History} title="Workout History" />
       <SecondaryButton icon={RefreshCw} label="Refresh" onPress={onRefresh} />
-      {progress.map((item) => (
-        <View key={item.exercise.id} style={styles.listCard}>
-          <Text style={styles.cardTitle}>{item.exercise.name}</Text>
-          <Text style={styles.cardText}>{item.total_sets} sets | {item.total_reps} reps</Text>
-          <Text style={styles.cardText}>Max {item.display_max_weight ?? 0} {item.display_weight_unit ?? 'kg'}</Text>
+
+      <View style={styles.panel}>
+        <View style={styles.sectionTitle}>
+          <Search color={colors.red} size={20} />
+          <Text style={styles.panelTitle}>Search by date</Text>
         </View>
-      ))}
-      {sessions.map((session) => (
+        <View style={styles.inlineInputs}>
+          <TextInput style={[styles.input, styles.shortInput]} placeholder="From YYYY-MM-DD" placeholderTextColor={colors.steel} value={fromDate} onChangeText={setFromDate} />
+          <TextInput style={[styles.input, styles.shortInput]} placeholder="To YYYY-MM-DD" placeholderTextColor={colors.steel} value={toDate} onChangeText={setToDate} />
+        </View>
+        {fromDate || toDate ? <SecondaryButton icon={RefreshCw} label="Clear Dates" onPress={() => { setFromDate(''); setToDate(''); }} /> : null}
+      </View>
+
+      {filteredSessions.length === 0 ? <InfoCard icon={History} title="No workout sessions" text="No workouts match the selected dates." /> : null}
+
+      {filteredSessions.map((session) => (
         <View key={session.id} style={styles.listCard}>
           <View style={styles.cardTopLine}>
             <Text style={styles.cardTitle}>{session.workout?.name ?? `Workout #${session.workout_id}`}</Text>
@@ -1228,7 +1273,10 @@ function HistoryScreen({
           </View>
           <Text style={styles.cardText}>Started {new Date(session.started_at).toLocaleString()}</Text>
           {session.completed_at ? <Text style={styles.cardText}>Completed {new Date(session.completed_at).toLocaleString()}</Text> : null}
-          <SecondaryButton icon={Pencil} label="Edit Session" onPress={() => onOpenSession(session.id)} />
+          <View style={styles.buttonGrid}>
+            <SecondaryButton icon={Pencil} label="Edit Session" onPress={() => onOpenSession(session.id)} />
+            <DangerButton icon={Trash2} label="Delete Session" onPress={() => onDeleteSession(session)} />
+          </View>
         </View>
       ))}
     </View>
@@ -1361,6 +1409,15 @@ function InlineNotice({ type, text }: { type: 'success' | 'error'; text: string 
   );
 }
 
+function ToastNotice({ text }: { text: string }) {
+  return (
+    <View style={styles.toast}>
+      <Check color={colors.success} size={18} />
+      <Text style={styles.toastText}>{text}</Text>
+    </View>
+  );
+}
+
 function CenterPanel({ text, compact }: { text: string; compact?: boolean }) {
   return (
     <View style={[styles.centerPanel, compact && styles.centerPanelCompact]}>
@@ -1376,6 +1433,38 @@ function getWorkoutExercises(workout?: Workout | null): WorkoutExercise[] {
 
 function getWorkoutExerciseId(item: WorkoutExercise): number | undefined {
   return item.workout_exercise_id ?? item.id;
+}
+
+function isDateInRange(value: string, fromDate: string, toDate: string): boolean {
+  const date = new Date(value);
+  const from = parseDateBoundary(fromDate, false);
+  const to = parseDateBoundary(toDate, true);
+
+  if (Number.isNaN(date.getTime())) {
+    return true;
+  }
+
+  if (from && date < from) {
+    return false;
+  }
+
+  if (to && date > to) {
+    return false;
+  }
+
+  return true;
+}
+
+function parseDateBoundary(value: string, endOfDay: boolean): Date | null {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  const date = new Date(`${trimmed}T${endOfDay ? '23:59:59' : '00:00:00'}`);
+
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function getWorkoutExerciseName(item: WorkoutExercise): string {
@@ -1943,6 +2032,31 @@ const styles = StyleSheet.create({
   },
   noticeErrorText: {
     color: colors.error,
+  },
+  toast: {
+    position: 'absolute',
+    top: Platform.OS === 'web' ? 76 : 64,
+    left: 16,
+    right: 16,
+    maxWidth: 520,
+    alignSelf: 'center',
+    zIndex: 20,
+    elevation: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#B8E2C8',
+    backgroundColor: colors.successBg,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  toastText: {
+    color: colors.success,
+    fontSize: 14,
+    fontWeight: '800',
+    flex: 1,
   },
   errorText: {
     color: colors.error,
